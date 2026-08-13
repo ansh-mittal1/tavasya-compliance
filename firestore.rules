@@ -1,0 +1,115 @@
+rules_version = '2';
+
+// ============================================================
+//  Tavasya Compliance Register — security rules
+//
+//  IMPORTANT: edit emailPattern() below with your real domain,
+//  then paste the whole file into
+//  Firebase Console -> Firestore Database -> Rules -> Publish.
+//
+//  These rules are the ONLY thing protecting your data. The app's
+//  screens just hide things; the rules actually enforce them.
+//
+//  Roles, two tiers:
+//    admin  — everything a member can do, plus manage the team
+//             list (add/remove people, change roles) and delete
+//             a compliance row.
+//    member — see every compliance, add new ones, edit any of
+//             them (mark complete, add a link, fix a date), but
+//             cannot touch the team list or delete a row.
+//
+//  There's no per-person ownership here on purpose: this is a
+//  small team jointly responsible for one fund's compliance
+//  calendar, not individual reps with private data (unlike the
+//  meeting ledger). Anyone active can see and update everything;
+//  deletion is the one thing kept to admins, as a guard rail
+//  against accidental data loss rather than a privacy boundary.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // EDIT THIS ONE LINE. Escape the dots as [.] — it is a regex.
+    // TESTING PHASE: gmail.com, to match config.js. Anyone with a
+    // Gmail address passes this check, but isMember() below still
+    // requires being explicitly added to the `users` collection —
+    // that's the real access boundary, not this domain check.
+    function emailPattern() {
+      return '^[^@]+@gmail[.]com$';
+    }
+
+    function callerEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    // Signed in, inbox confirmed, and on our domain.
+    function onDomain() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true
+        && callerEmail().matches(emailPattern());
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(callerEmail())).data;
+    }
+
+    // On the domain AND on the team list AND not switched off.
+    function isMember() {
+      return onDomain()
+        && exists(/databases/$(database)/documents/users/$(callerEmail()))
+        && profile().active == true;
+    }
+
+    function isAdmin() {
+      return isMember() && profile().role == 'admin';
+    }
+
+    // ---------- the team list ----------
+    // Everyone reads their own entry. Any active member reads the
+    // whole roster (needed to assign an owner to a compliance).
+    // Only an admin may create, edit, or remove anyone.
+    match /users/{email} {
+      allow get:  if isMember() || (onDomain() && callerEmail() == email);
+      allow list: if isMember();
+      allow write: if isAdmin();
+    }
+
+    // ---------- compliances ----------
+    // Document ID is deterministic: `${schemeCode}-${obligationCode}-${dueDate|ONG}`.
+    // Not a duplicate guard like the meeting ledger — just a stable,
+    // human-readable key so re-importing the same seed data twice
+    // overwrites in place instead of creating copies.
+    match /compliances/{complianceId} {
+      allow get, list: if isMember();
+
+      allow create: if isMember()
+        && request.resource.data.obligation is string
+        && request.resource.data.obligation.size() > 0
+        && request.resource.data.scheme is string
+        && request.resource.data.dueDate is string
+        && request.resource.data.completed is bool;
+
+      // Any member can update (mark complete, edit dates/links/notes).
+      allow update: if isMember();
+
+      // Only an admin can delete a row.
+      allow delete: if isAdmin();
+    }
+
+    // ---------- reminder log ----------
+    // One doc per compliance, written by the scheduled script (via a
+    // service account, which bypasses these rules entirely) to record
+    // what was last sent. Members can read it to see reminder history;
+    // nobody writes it from the browser.
+    match /reminderLog/{complianceId} {
+      allow get, list: if isMember();
+      allow write: if false;
+    }
+
+    // Nothing else is reachable.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
