@@ -178,7 +178,7 @@ async function boot() {
     return;
   }
   state.profile = snap.data();
-  $("who-name").textContent = `${state.profile.name || user.email} · ${isAdmin() ? "Admin" : "Member"}`;
+  $("who-name").textContent = `${state.profile.name || user.email} · ${roleLabel(state.profile.role)}`;
   $("btn-add-person").hidden = !isAdmin();
   $("btn-import").hidden = !isAdmin();
 
@@ -280,7 +280,7 @@ function fmtRange(a, b) {
 function weekItemHtml(c) {
   const done = c.completed ? `<span class="wk-done">✓ done</span>` : "";
   return `
-    <div class="wk-item">
+    <div class="wk-item${isAdmin() ? " clickable" : ""}" data-id="${esc(c.id)}">
       <span class="wk-date">${esc(fmtDay(c.dueDate))}</span>
       <span class="wk-name">${esc(c.obligation)}${done}</span>
       <span class="wk-meta">${esc(c.scheme)}</span>
@@ -322,6 +322,16 @@ $("btn-week-prev").addEventListener("click", () => { state.dashboardWeekOffset--
 $("btn-week-next").addEventListener("click", () => { state.dashboardWeekOffset++; renderWeeklyPanel(); });
 $("btn-week-today").addEventListener("click", () => { state.dashboardWeekOffset = 0; renderWeeklyPanel(); });
 
+function weekListClick(e) {
+  if (!isAdmin()) return;
+  const item = e.target.closest(".wk-item");
+  if (!item) return;
+  const c = state.compliances.find((x) => x.id === item.dataset.id);
+  if (c) openDetail(c);
+}
+$("overdue-list").addEventListener("click", weekListClick);
+$("due-this-week").addEventListener("click", weekListClick);
+
 /* ============================ register ============================ */
 function currentFilters() {
   return { search: $("f-search").value.trim().toLowerCase(), scheme: $("f-scheme").value, status: $("f-status").value };
@@ -345,7 +355,7 @@ function renderRegister() {
     const d = c.dueDate ? daysBetween(c.dueDate) : null;
     const daysLabel = c.completed ? "—" : c.dueDate ? (d < 0 ? `${Math.abs(d)}d over` : `${d}d`) : "—";
     return `
-    <tr data-id="${esc(c.id)}">
+    <tr data-id="${esc(c.id)}" class="${isAdmin() ? "clickable" : ""}">
       <td class="col-due">${esc(fmtDay(c.dueDate) || "—")}</td>
       <td class="col-days">${esc(daysLabel)}</td>
       <td><span class="badge badge-${statusClass(c._status)}">${esc(c._status)}</span></td>
@@ -371,8 +381,11 @@ $("register-body").addEventListener("click", async (e) => {
   if (!row) return;
   const id = row.dataset.id;
   const c = state.compliances.find((x) => x.id === id);
-  if (e.target.dataset.action === "edit") openDrawer(c);
-  if (e.target.dataset.action === "toggle") await toggleComplete(c, e.target.checked);
+  if (e.target.dataset.action === "edit") { openDrawer(c); return; }
+  if (e.target.dataset.action === "toggle") { await toggleComplete(c, e.target.checked); return; }
+  // Any other click on the row itself (not an action control) opens the
+  // read-only detail view — admins only, matching the Dashboard behaviour.
+  if (isAdmin() && c) openDetail(c);
 });
 
 async function toggleComplete(c, completed) {
@@ -385,6 +398,56 @@ async function toggleComplete(c, completed) {
   renderRegister();
   toast(completed ? "Marked complete — reminders stop" : "Marked incomplete");
 }
+
+/* ============================ detail modal (admin-only) ============================ */
+function openDetail(c) {
+  const status = statusOf(c);
+  $("dt-obligation").textContent = c.obligation;
+  $("dt-scheme-period").textContent = [c.scheme, c.period, c.fy].filter(Boolean).join(" · ");
+  $("dt-status").textContent = status;
+  $("dt-status").className = "badge badge-" + statusClass(status);
+  $("dt-due").textContent = c.dueDate ? `Due ${fmtDay(c.dueDate)}` : "No fixed due date";
+
+  const owner = state.team.find((t) => t.email === c.ownerEmail);
+  if (owner) {
+    $("dt-owner-name").textContent = owner.name || owner.email;
+    $("dt-owner-email").textContent = owner.email;
+  } else {
+    $("dt-owner-name").textContent = "Unassigned";
+    $("dt-owner-email").textContent = "";
+  }
+
+  // Hierarchy lookup: owner -> owner.reportsTo -> that person's record.
+  // Team Leads and Admins have no reportsTo of their own — Admin is the
+  // implicit top of the chain, so there's nothing further to show for them.
+  let leadName = "—", leadEmail = "";
+  if (owner && owner.role === "member" && owner.reportsTo) {
+    const lead = state.team.find((t) => t.email === owner.reportsTo);
+    if (lead) { leadName = lead.name || lead.email; leadEmail = lead.email; }
+    else { leadName = "Assigned lead not found"; }
+  } else if (owner && owner.role !== "member") {
+    leadName = owner.role === "admin" ? "— (Admin is top of hierarchy)" : "Reports to Admin";
+  } else if (owner) {
+    leadName = "Not assigned yet";
+  }
+  $("dt-lead-name").textContent = leadName;
+  $("dt-lead-email").textContent = leadEmail;
+
+  $("dt-regulator").textContent = c.regulator || "—";
+  $("dt-link").innerHTML = c.link ? `<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.link)}</a>` : "—";
+  $("dt-notes").textContent = c.notes || "—";
+
+  $("btn-detail-edit").onclick = () => { closeDetail(); openDrawer(c); };
+
+  $("detail-backdrop").hidden = false;
+  $("detail-modal").hidden = false;
+}
+function closeDetail() {
+  $("detail-backdrop").hidden = true;
+  $("detail-modal").hidden = true;
+}
+$("btn-detail-close").addEventListener("click", closeDetail);
+$("detail-backdrop").addEventListener("click", closeDetail);
 
 /* ============================ drawer: add/edit compliance ============================ */
 $("btn-add").addEventListener("click", () => openDrawer(null));
@@ -543,27 +606,58 @@ $("btn-delete").addEventListener("click", async () => {
 });
 
 /* ============================ team ============================ */
+const roleLabel = (r) => (r === "admin" ? "Admin" : r === "teamlead" ? "Team Lead" : "Member");
+
 function renderTeam() {
-  $("team-body").innerHTML = state.team.map((t) => `
+  const leads = state.team.filter((t) => t.role === "teamlead" && t.active);
+
+  $("team-body").innerHTML = state.team.map((t) => {
+    const roleCell = isAdmin() ? `
+        <select class="t-role" data-email="${esc(t.email)}">
+          <option value="member" ${t.role === "member" ? "selected" : ""}>Member</option>
+          <option value="teamlead" ${t.role === "teamlead" ? "selected" : ""}>Team Lead</option>
+          <option value="admin" ${t.role === "admin" ? "selected" : ""}>Admin</option>
+        </select>` : esc(roleLabel(t.role));
+
+    const reportsCell = t.role !== "member"
+      ? `<span class="detail-sub">${t.role === "admin" ? "— top of hierarchy —" : "Reports to Admin"}</span>`
+      : isAdmin()
+        ? `<select class="t-reports" data-email="${esc(t.email)}">
+             <option value="">Unassigned</option>
+             ${leads.map((l) => `<option value="${esc(l.email)}" ${t.reportsTo === l.email ? "selected" : ""}>${esc(l.name || l.email)}</option>`).join("")}
+           </select>`
+        : esc((leads.find((l) => l.email === t.reportsTo) || {}).name || "Unassigned");
+
+    return `
     <tr data-email="${esc(t.email)}">
       <td>${esc(t.name || "—")}</td>
       <td>${esc(t.email)}</td>
-      <td>${isAdmin() ? `
-        <select class="t-role" data-email="${esc(t.email)}">
-          <option value="member" ${t.role === "member" ? "selected" : ""}>Member</option>
-          <option value="admin" ${t.role === "admin" ? "selected" : ""}>Admin</option>
-        </select>` : esc(t.role === "admin" ? "Admin" : "Member")}</td>
+      <td>${roleCell}</td>
+      <td>${reportsCell}</td>
       <td>${t.active ? "Active" : "Removed"}</td>
       <td>${isAdmin() ? `<button class="btn-icon t-toggle" data-email="${esc(t.email)}">${t.active ? "Remove" : "Restore"}</button>` : ""}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
 }
 
 $("team-body").addEventListener("change", async (e) => {
-  if (!e.target.classList.contains("t-role")) return;
   const email = e.target.dataset.email;
-  await updateDoc(doc(db, "users", email), { role: e.target.value });
-  await loadTeam(); renderTeam(); populateSchemeOptions();
-  toast("Role updated");
+  if (!email) return;
+  if (e.target.classList.contains("t-role")) {
+    const newRole = e.target.value;
+    // Reports-to only means something for a Member — clear it the moment
+    // someone becomes a Team Lead or Admin, so stale hierarchy data doesn't
+    // linger and show up wrong in the compliance detail view later.
+    const patch = { role: newRole };
+    if (newRole !== "member") patch.reportsTo = "";
+    await updateDoc(doc(db, "users", email), patch);
+    await loadTeam(); renderTeam(); populateSchemeOptions();
+    toast("Role updated");
+  } else if (e.target.classList.contains("t-reports")) {
+    await updateDoc(doc(db, "users", email), { reportsTo: e.target.value });
+    await loadTeam(); renderTeam();
+    toast("Reporting line updated");
+  }
 });
 $("team-body").addEventListener("click", async (e) => {
   if (!e.target.classList.contains("t-toggle")) return;
@@ -579,8 +673,24 @@ $("btn-add-person").addEventListener("click", async () => {
   if (!name) return;
   const email = (prompt(`Work email (must end @${ORG_DOMAIN}):`) || "").trim().toLowerCase();
   if (!email.endsWith("@" + ORG_DOMAIN)) { alert(`Must be an @${ORG_DOMAIN} address.`); return; }
-  const role = confirm("Make this person an Admin? Cancel = Member.") ? "admin" : "member";
-  await setDoc(doc(db, "users", email), { email, name, role, active: true });
+
+  const roleInput = (prompt("Role — type one of: member, teamlead, admin", "member") || "").trim().toLowerCase();
+  const role = ["member", "teamlead", "admin"].includes(roleInput) ? roleInput : "member";
+
+  let reportsTo = "";
+  if (role === "member") {
+    const leads = state.team.filter((t) => t.role === "teamlead" && t.active);
+    if (leads.length) {
+      const list = leads.map((l, i) => `${i + 1}. ${l.name || l.email}`).join("\n");
+      const pick = prompt(`Reports to which Team Lead? Type a number, or leave blank to assign later:\n${list}`);
+      const idx = parseInt(pick, 10) - 1;
+      if (leads[idx]) reportsTo = leads[idx].email;
+    } else {
+      alert("No Team Leads exist yet — this person will show as Unassigned until you add one and set it from the Team tab.");
+    }
+  }
+
+  await setDoc(doc(db, "users", email), { email, name, role, active: true, reportsTo });
   await loadTeam(); renderTeam(); populateSchemeOptions();
   toast("Person added");
 });
