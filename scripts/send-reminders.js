@@ -7,20 +7,39 @@
 // Stops on its own: once `completed` is set to true in the app, this
 // query no longer matches that row. Nothing to "turn off" separately.
 //
+// ============================================================
+// TESTING PHASE — sends via Gmail SMTP (Nodemailer), since there's no
+// Microsoft 365 tenant to test against yet. When this moves to Tavasya's
+// real domain, swap this file back to the Microsoft Graph version — the
+// rest of the logic (grouping, windows, stop-on-complete) is identical
+// either way, only the "actually send the email" part changes.
+// ============================================================
+//
 // Required environment variables (set as GitHub Actions secrets):
 //   FIREBASE_SERVICE_ACCOUNT_JSON   — full JSON key, as a single-line string
-//   MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET
-//       — from an Azure AD App Registration with Mail.Send (Application,
-//         admin-consented) permission. See README "Reminder emails" section.
-//   MS_SENDER_EMAIL                 — the mailbox the mail is sent FROM
-//                                      (e.g. compliance@tavasya.fund)
+//   GMAIL_USER                      — the Gmail address sending the mail
+//   GMAIL_APP_PASSWORD              — a 16-character App Password (NOT your
+//                                      normal Gmail password — see README)
 
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import nodemailer from "nodemailer";
 
 const svcJson = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
 initializeApp({ credential: cert(svcJson) });
 const db = getFirestore();
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD }
+});
+
+async function sendMail(to, subject, html) {
+  await transporter.sendMail({
+    from: `"Tavasya Compliance" <${process.env.GMAIL_USER}>`,
+    to, subject, html
+  });
+}
 
 const pad = (n) => String(n).padStart(2, "0");
 const todayISO = () => {
@@ -37,37 +56,6 @@ function daysBetween(iso) {
 function fmtDay(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
-}
-
-async function getGraphToken() {
-  const res = await fetch(`https://login.microsoftonline.com/${process.env.MS_TENANT_ID}/oauth2/v2.0/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.MS_CLIENT_ID,
-      client_secret: process.env.MS_CLIENT_SECRET,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials"
-    })
-  });
-  if (!res.ok) throw new Error(`Graph token request failed: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  return data.access_token;
-}
-
-async function sendMail(token, to, subject, html) {
-  const res = await fetch(`https://graph.microsoft.com/v1.0/users/${process.env.MS_SENDER_EMAIL}/sendMail`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      message: {
-        subject,
-        body: { contentType: "HTML", content: html },
-        toRecipients: [{ emailAddress: { address: to } }]
-      }
-    })
-  });
-  if (!res.ok) throw new Error(`sendMail to ${to} failed: ${res.status} ${await res.text()}`);
 }
 
 function rowHtml(c) {
@@ -146,7 +134,6 @@ async function run() {
     }
   }
 
-  const token = await getGraphToken();
   const today = fmtDay(todayISO());
   const log = db.batch();
 
@@ -158,7 +145,7 @@ async function run() {
     const heading = `${unique.length} item${unique.length === 1 ? "" : "s"} due or overdue as of ${today}` +
       (overdueCount ? ` — ${overdueCount} overdue` : "");
     try {
-      await sendMail(token, email, `Compliance reminders — ${today}`, digestHtml(unique, heading));
+      await sendMail(email, `Compliance reminders — ${today}`, digestHtml(unique, heading));
       console.log(`Sent to ${email}: ${unique.length} item(s)`);
     } catch (e) {
       console.error(`Failed sending to ${email}:`, e.message);
