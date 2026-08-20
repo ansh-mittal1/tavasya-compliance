@@ -178,7 +178,7 @@
     </div>
     <div class="table-wrap">
       <table class="ledger">
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Reports to</th><th>Status</th><th></th></tr></thead>
         <tbody id="team-body"></tbody>
       </table>
     </div>
@@ -253,6 +253,53 @@
     </div>
   </form>
 </aside>
+
+<!-- ============ MODAL: compliance details (admin-only, read-only) ============ -->
+<div id="detail-backdrop" class="drawer-backdrop" hidden></div>
+<div id="detail-modal" class="modal-card" hidden>
+  <div class="drawer-head">
+    <h2>Compliance details</h2>
+    <button id="btn-detail-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+  <div class="detail-body">
+    <p class="detail-oblig" id="dt-obligation"></p>
+    <p class="detail-sub" id="dt-scheme-period"></p>
+    <div class="detail-row"><span class="badge" id="dt-status"></span><span id="dt-due" class="detail-due"></span></div>
+
+    <div class="detail-grid">
+      <div>
+        <p class="detail-label">Responsible (Owner)</p>
+        <p class="detail-value" id="dt-owner-name">—</p>
+        <p class="detail-sub" id="dt-owner-email"></p>
+      </div>
+      <div>
+        <p class="detail-label">Team Lead</p>
+        <p class="detail-value" id="dt-lead-name">—</p>
+        <p class="detail-sub" id="dt-lead-email"></p>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <div>
+        <p class="detail-label">Regulator</p>
+        <p class="detail-value" id="dt-regulator">—</p>
+      </div>
+      <div>
+        <p class="detail-label">Filing link</p>
+        <p class="detail-value" id="dt-link">—</p>
+      </div>
+    </div>
+
+    <div>
+      <p class="detail-label">Notes</p>
+      <p class="detail-value" id="dt-notes">—</p>
+    </div>
+
+    <div class="drawer-actions" style="justify-content:flex-end">
+      <button id="btn-detail-edit" class="btn btn-primary">Edit this compliance</button>
+    </div>
+  </div>
+</div>
 
 <!-- ============ TOAST ============ -->
 <div id="toast" class="toast" hidden></div>
