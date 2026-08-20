@@ -243,6 +243,28 @@ table.ledger{ width:100%; border-collapse:collapse; font-size:13.5px }
 .done-fields{ display:flex; flex-direction:column; gap:12px; margin-top:14px }
 .drawer-actions{ display:flex; justify-content:space-between; gap:10px; padding-top:6px }
 
+/* ---------------- detail modal (admin, read-only) ---------------- */
+.modal-card{
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:22;
+  width:min(520px, 92vw); max-height:85vh; overflow-y:auto;
+  background:var(--bg-elev); border:1px solid var(--line); border-radius:6px;
+  box-shadow:0 24px 60px rgba(0,0,0,0.5);
+}
+.detail-body{ padding:20px }
+.detail-oblig{ font-family:var(--font-display); font-size:20px; margin:0 0 4px }
+.detail-sub{ color:var(--ink-dim); font-size:12.5px; margin:0 }
+.detail-row{ display:flex; align-items:center; gap:10px; margin:12px 0 20px }
+.detail-due{ font-family:var(--font-mono); font-size:13px; color:var(--ink-dim) }
+.detail-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:18px; padding-bottom:18px; border-bottom:1px solid var(--line-soft) }
+.detail-grid:last-of-type{ border-bottom:none }
+.detail-label{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); margin:0 0 4px }
+.detail-value{ font-size:14px; color:var(--ink); margin:0; word-break:break-word }
+.detail-value a{ color:var(--accent) }
+.wk-item{ cursor:default }
+.wk-item.clickable{ cursor:pointer }
+.wk-item.clickable:hover{ background:var(--bg-elev-2) }
+.ledger tbody tr.clickable{ cursor:pointer }
+
 /* ---------------- toast ---------------- */
 .toast{
   position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
